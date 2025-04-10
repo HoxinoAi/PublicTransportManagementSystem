@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+    <title>地图规划</title>
+    <link rel="stylesheet" href="../../layui/css/layui.css">
+    <style>
+        #container {
+            width: 100%;
+            height: 100vh;
+            position: relative;
+        }
+        .search-box {
+            position: absolute;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 100;
+            width: 300px;
+            background: white;
+            padding: 10px;
+            border-radius: 4px;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+        }
+        .search-input {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            margin-bottom: 10px;
+        }
+        .search-button {
+            width: 100%;
+            background-color: #4d4f36;
+            color: white;
+            border: none;
+            padding: 8px;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        .search-button:hover {
+            background-color: #3d3f26;
+        }
+        #panel {
+            position: fixed;
+            background-color: white;
+            max-height: 90%;
+            overflow-y: auto;
+            top: 10px;
+            right: 10px;
+            width: 280px;
+            border-radius: 4px;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+        }
+        .route-button {
+            width: 100%;
+            background-color: #4d4f36;
+            color: white;
+            border: none;
+            padding: 8px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin-top: 10px;
+        }
+        .route-button:hover {
+            background-color: #3d3f26;
+        }
+        /* 添加用于显示最佳路线信息的样式 */
+        #best-route-info {
+            position: absolute;
+            top: 100px; /* 调整位置，使其在搜索框下方 */
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 100;
+            width: 300px;
+            background: #e8f5e9; /* 淡绿色背景 */
+            color: #2e7d32; /* 深绿色文字 */
+            padding: 10px;
+            border-radius: 4px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            text-align: center;
+            font-weight: bold;
+            display: none; /* 默认隐藏 */
+        }
+    </style>
+</head>
+<body>
+    <div id="container"></div>
+    <div class="search-box">
+        <input type="text" class="search-input" id="startInput" placeholder="请输入起点">
+        <input type="text" class="search-input" id="endInput" placeholder="请输入终点">
+        <button class="route-button" onclick="searchRoute()">规划公交路线</button>
+    </div>
+    <!-- 新增：用于显示最佳路线信息的元素 -->
+    <div id="best-route-info"></div> 
+    <div id="panel"></div>
+
+    <script type="text/javascript">
+        window._AMapSecurityConfig = {
+            securityJsCode: '5fd8b7e217322f93d862a38dbb6c549b'
+        }
+    </script>
+    <script type="text/javascript" src="https://webapi.amap.com/maps?v=2.0&key=5f1ea96230dcb95f4dbf26b422c48f2b&plugin=AMap.PlaceSearch,AMap.Geocoder,AMap.Transfer"></script>
+    <script>
+        var map = new AMap.Map('container', {
+            zoom: 11,
+            center: [106.551556, 29.563009], // 重庆市中心坐标
+            viewMode: '3D'
+        });
+
+        // 添加定位控件
+        map.plugin('AMap.Geolocation', function() {
+            var geolocation = new AMap.Geolocation({
+                enableHighAccuracy: true,
+                timeout: 10000,
+                buttonPosition: 'RB',
+                buttonOffset: new AMap.Pixel(10, 20),
+                zoomToAccuracy: true
+            });
+            map.addControl(geolocation);
+        });
+
+        // 添加比例尺控件
+        map.plugin('AMap.Scale', function() {
+            var scale = new AMap.Scale();
+            map.addControl(scale);
+        });
+
+        // 添加工具条控件
+        map.plugin('AMap.ToolBar', function() {
+            var toolbar = new AMap.ToolBar();
+            map.addControl(toolbar);
+        });
+
+        // 初始化公交换乘服务
+        var transfer = new AMap.Transfer({
+            map: map,
+            panel: 'panel',
+            city: '重庆市',
+            policy: AMap.TransferPolicy.LEAST_TIME //乘车策略
+        });
+
+        // 搜索功能
+        var placeSearch = new AMap.PlaceSearch({
+            map: map,
+            pageSize: 10,
+            pageIndex: 1
+        });
+
+        // Dijkstra算法实现
+        class Graph {
+            constructor() {
+                this.nodes = new Set();
+                this.edges = new Map();
+            }
+
+            addNode(node) {
+                this.nodes.add(node);
+                if (!this.edges.has(node)) {
+                    this.edges.set(node, new Map());
+                }
+            }
+
+            addEdge(from, to, weight) {
+                this.addNode(from);
+                this.addNode(to);
+                this.edges.get(from).set(to, weight);
+                this.edges.get(to).set(from, weight);
+            }
+
+            dijkstra(start, end) {
+                const distances = new Map();
+                const previous = new Map();
+                const unvisited = new Set();
+
+                // 初始化距离
+                for (const node of this.nodes) {
+                    distances.set(node, Infinity);
+                    unvisited.add(node);
+                }
+                distances.set(start, 0);
+
+                while (unvisited.size > 0) {
+                    // 找到未访问节点中距离最小的
+                    let minNode = null;
+                    let minDistance = Infinity;
+                    for (const node of unvisited) {
+                        if (distances.get(node) < minDistance) {
+                            minNode = node;
+                            minDistance = distances.get(node);
+                        }
+                    }
+
+                    if (minNode === null) break;
+                    if (minNode === end) break;
+
+                    unvisited.delete(minNode);
+
+                    // 更新相邻节点的距离
+                    const neighbors = this.edges.get(minNode);
+                    for (const [neighbor, weight] of neighbors) {
+                        if (!unvisited.has(neighbor)) continue;
+
+                        const distance = distances.get(minNode) + weight;
+                        if (distance < distances.get(neighbor)) {
+                            distances.set(neighbor, distance);
+                            previous.set(neighbor, minNode);
+                        }
+                    }
+                }
+
+                // 构建路径
+                const path = [];
+                let current = end;
+                while (current !== null) {
+                    path.unshift(current);
+                    current = previous.get(current);
+                }
+
+                return {
+                    path: path,
+                    distance: distances.get(end)
+                };
+            }
+        }
+
+        // 路线评分函数
+        function calculateRouteScore(route) {
+            const timeWeight = 0.4;  // 时间权重
+            const costWeight = 0.3;  // 费用权重
+            const transferWeight = 0.3;  // 换乘次数权重
+
+            const timeScore = 1 / (route.time / 60);  // 转换为分钟并取倒数
+            const costScore = 1 / (route.cost || 1);  // 费用取倒数，避免除以0
+            const transferScore = 1 / (route.transfers + 1);  // 换乘次数取倒数
+
+            return (timeScore * timeWeight + costScore * costWeight + transferScore * transferWeight);
+        }
+
+        function searchLocation() {
+            var keyword = document.getElementById('startInput').value;
+            if (keyword) {
+                placeSearch.search(keyword, function(status, result) {
+                    if (status === 'complete' && result.info === 'OK') {
+                        var firstResult = result.poiList.pois[0];
+                        if (firstResult) {
+                            map.setCenter([firstResult.location.lng, firstResult.location.lat]);
+                            map.setZoom(15);
+                        }
+                    } else {
+                        alert('搜索失败，请重试');
+                    }
+                });
+            }
+        }
+
+        // 路线规划功能
+        function searchRoute() {
+            var startKeyword = document.getElementById('startInput').value;
+            var endKeyword = document.getElementById('endInput').value;
+            
+            if (startKeyword && endKeyword) {
+                // 清除先前的结果
+                map.clearMap(); // 清除地图覆盖物
+                document.getElementById('panel').innerHTML = ''; // 清空路线面板
+                document.getElementById('best-route-info').style.display = 'none'; // 隐藏推荐信息
+                document.getElementById('best-route-info').innerHTML = ''; // 清空推荐信息内容
+                
+                transfer.search([
+                    { keyword: startKeyword, city: '重庆市' },
+                    { keyword: endKeyword, city: '重庆市' }
+                ], function(status, result) {
+                    if (status === 'complete' && result.plans && result.plans.length > 0) {
+                         // 结果返回成功且有路线方案
+                        displayBestRouteInfo(result); // 调用新的函数显示最佳路线信息
+                    } else {
+                        alert('公交路线规划失败，未找到合适的路线或查询出错。');
+                    }
+                });
+            } else {
+                alert('请输入起点和终点');
+            }
+        }
+
+        // 显示最佳路线信息
+        function displayBestRouteInfo(result) {
+             // 延迟执行确保面板内容已初步渲染（如果需要依赖面板内容的话，但这里仅计算和显示信息，可能不需要延迟）
+            setTimeout(function() {
+                try {
+                    // 计算每条路线的得分
+                    const routesWithScores = result.plans.map((plan, index) => {
+                        const score = calculateRouteScore({
+                            time: plan.time,
+                            cost: plan.cost || 0,
+                            transfers: plan.segments.length - 1 // 换乘次数是段数减1
+                        });
+                         // 在控制台输出每条路线的详细得分信息
+                        console.log(`路线 ${index + 1}: 得分 = ${score.toFixed(4)}, 时间 = ${plan.time}秒, 费用 = ${plan.cost || 0}元, 换乘次数 = ${plan.segments.length - 1}`);
+                        return { plan, score, index }; // 保留原始索引
+                    });
+
+                    // 找出得分最高的路线
+                    if (routesWithScores.length === 0) {
+                        console.log('没有有效的路线进行评分。');
+                        return; // 如果没有路线得分，则不继续
+                    }
+                    
+                    const bestRoute = routesWithScores.reduce((best, current) => 
+                        current.score > best.score ? current : best
+                    );
+                    const bestRouteIndex = bestRoute.index; // 使用原始索引
+
+                    // 获取用于显示信息的元素
+                    const infoDiv = document.getElementById('best-route-info');
+                    
+                    // 设置并显示信息
+                    infoDiv.innerHTML = `<strong>最佳推荐：路线 ${bestRouteIndex + 1}</strong> (综合评分: ${bestRoute.score.toFixed(2)})`;
+                    infoDiv.style.display = 'block'; // 显示信息框
+
+                    console.log(`系统已确定最佳路线为：路线 ${bestRouteIndex + 1}`);
+                    
+                    // 可选：将地图视图中心调整到最佳路线的起点或终点
+                    if (result.start && result.start.location) {
+                         map.setCenter(result.start.location);
+                    }
+                    map.setZoom(12); // 设置一个合适的缩放级别
+
+                } catch (e) {
+                    console.error('处理并显示最佳路线信息时出错:', e);
+                    const infoDiv = document.getElementById('best-route-info');
+                    infoDiv.innerHTML = '无法确定最佳路线'; // 显示错误提示
+                    infoDiv.style.display = 'block';
+                }
+            }, 100); // 短暂延迟，如果需要等待地图API某些异步操作完成
+        }
+
+        // 添加回车搜索功能
+        document.getElementById('startInput').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                if (document.getElementById('endInput').value) {
+                    searchRoute(); // 如果终点有值，按回车触发路线规划
+                } else {
+                    // searchLocation(); // 如果终点没值，可以触发地点搜索（如果需要）
+                }
+            }
+        });
+
+        document.getElementById('endInput').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                searchRoute(); // 在终点框按回车直接触发路线规划
+            }
+        });
+    </script>
+</body>
+</html> 

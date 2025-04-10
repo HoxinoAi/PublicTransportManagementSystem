@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>地图规划</title>
+    <style>
+        #container {
+            width: 100%;
+            height: 100vh;
+            position: relative;
+        }
+        .search-box {
+            position: absolute;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 100;
+            width: 300px;
+            background: white;
+            padding: 10px;
+            border-radius: 4px;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.1);
+        }
+        #search-input {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+    </style>
+    <script type="text/javascript">
+        window._AMapSecurityConfig = {
+            securityJsCode: '5fd8b7e217322f93d862a38dbb6c549b'
+        }
+    </script>
+    <script type="text/javascript" src="https://webapi.amap.com/maps?v=2.0&key=5f1ea96230dcb95f4dbf26b422c48f2b&plugin=AMap.PlaceSearch"></script>
+</head>
+<body>
+    <div id="container"></div>
+    <div class="search-box">
+        <input type="text" id="search-input" placeholder="请输入地点搜索">
+    </div>
+
+    <script>
+        // 初始化地图
+        var map = new AMap.Map('container', {
+            zoom: 11,
+            center: [106.551556, 29.563009], // 重庆市中心坐标
+            viewMode: '3D'
+        });
+
+        // 添加定位控件
+        map.addControl(new AMap.Geolocation());
+
+        // 添加比例尺控件
+        map.addControl(new AMap.Scale());
+
+        // 添加工具条控件
+        map.addControl(new AMap.ToolBar());
+
+        // 初始化搜索服务
+        var placeSearch = new AMap.PlaceSearch({
+            map: map,
+            pageSize: 10,
+            pageIndex: 1
+        });
+
+        // 搜索框事件监听
+        document.getElementById('search-input').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                var keyword = this.value;
+                if (keyword) {
+                    placeSearch.search(keyword, function(status, result) {
+                        if (status === 'complete' && result.info === 'OK') {
+                            // 搜索成功，结果会自动在地图上显示
+                            console.log('搜索成功');
+                        } else {
+                            alert('搜索失败，请重试');
+                        }
+                    });
+                }
+            }
+        });
+    </script>
+</body>
+</html> 
